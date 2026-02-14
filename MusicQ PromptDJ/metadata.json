@@ -1,0 +1,6 @@
+{
+  "name": "MusicQ PromptDJ",
+  "description": "Set a focus intent and get music. Control real time music with a MIDI controller.",
+  "requestFramePermissions": [],
+  "prompt": ""
+}
