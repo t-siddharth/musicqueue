@@ -1,189 +1,105 @@
 import os
-import base64
-import requests
-import webbrowser
-import threading
-import time
-from http.server import BaseHTTPRequestHandler, HTTPServer
-from urllib.parse import urlparse, parse_qs
-from dotenv import load_dotenv
+import subprocess
+from pathlib import Path
 
 
 # =========================
-# CALLBACK HANDLER
+# LOCAL MUSIC PLAYER
 # =========================
 
-class CallbackHandler(BaseHTTPRequestHandler):
-    auth_code = None
+class LocalMusicPlayer:
+    def __init__(self, music_directory=None):
+        self.music_directory = music_directory or self.find_music_directory()
 
-    def do_GET(self):
-        query = parse_qs(urlparse(self.path).query)
-        if "code" in query:
-            CallbackHandler.auth_code = query["code"][0]
-            self.send_response(200)
-            self.end_headers()
-            self.wfile.write(b"Authorization successful. You can close this window.")
+    # -------------------------
+    # FIND MUSIC DIRECTORY
+    # -------------------------
+
+    def find_music_directory(self):
+        """Use ayola's Music directory only"""
+        music_dir = Path("C:/Users/ayola/Music")
+        if music_dir.exists():
+            return str(music_dir)
         else:
-            self.send_response(400)
-            self.end_headers()
-
-
-# =========================
-# SPOTIFY PLAYER
-# =========================
-
-class SpotifyPlayer:
-    AUTH_URL = "https://accounts.spotify.com/authorize"
-    TOKEN_URL = "https://accounts.spotify.com/api/token"
-    API_BASE = "https://api.spotify.com/v1"
-
-    def __init__(self, client_id, client_secret, redirect_uri):
-        self.client_id = client_id
-        self.client_secret = client_secret
-        self.redirect_uri = redirect_uri
-        self.access_token = None
+            print(f"⚠️  Warning: {music_dir} not found!")
+            return str(music_dir)
 
     # -------------------------
-    # AUTHENTICATION
+    # SCAN ALL AUDIO FILES
     # -------------------------
 
-    def authenticate(self):
-        scope = "user-read-playback-state user-modify-playback-state"
-
-        auth_url = (
-            f"{self.AUTH_URL}?client_id={self.client_id}"
-            f"&response_type=code"
-            f"&redirect_uri={self.redirect_uri}"
-            f"&scope={scope}"
-        )
-
-        server = HTTPServer(("localhost", 8888), CallbackHandler)
-        threading.Thread(target=server.handle_request).start()
-
-        webbrowser.open(auth_url)
-
-        print("Waiting for Spotify authorization...")
-        while CallbackHandler.auth_code is None:
-            time.sleep(1)
-
-        server.server_close()
-
-        auth_header = base64.b64encode(
-            f"{self.client_id}:{self.client_secret}".encode()
-        ).decode()
-
-        response = requests.post(
-            self.TOKEN_URL,
-            headers={
-                "Authorization": f"Basic {auth_header}",
-                "Content-Type": "application/x-www-form-urlencoded",
-            },
-            data={
-                "grant_type": "authorization_code",
-                "code": CallbackHandler.auth_code,
-                "redirect_uri": self.redirect_uri,
-            },
-        )
-
-        response.raise_for_status()
-        self.access_token = response.json()["access_token"]
+    def scan_all_audio_files(self):
+        """Scan for all audio files in the music directory and subdirectories"""
+        search_dir = Path(self.music_directory)
+        
+        if not search_dir.exists():
+            print(f"❌ Directory not found: {search_dir}")
+            return []
+        
+        # All supported audio formats
+        audio_extensions = ['.mp3', '.wav', '.flac', '.m4a', '.aac', '.wma', '.ogg', '.opus', '.mp4', '.m4b']
+        
+        music_files = []
+        print(f"\n🔍 Scanning: {search_dir}")
+        
+        for ext in audio_extensions:
+            found_files = list(search_dir.glob(f'**/*{ext}'))
+            music_files.extend(found_files)
+        
+        return sorted(music_files)
 
     # -------------------------
-    # GET DEVICE
+    # PLAY ALL FILES
     # -------------------------
 
-    def get_active_device(self):
-        response = requests.get(
-            f"{self.API_BASE}/me/player/devices",
-            headers={"Authorization": f"Bearer {self.access_token}"},
-        )
-
-        response.raise_for_status()
-        devices = response.json()["devices"]
-
-        if not devices:
-            print("No active Spotify devices found. Open Spotify app first.")
-            return None
-
-        return devices[0]["id"]
-
-    # -------------------------
-    # SEARCH PLAYLIST
-    # -------------------------
-
-    def search_playlist(self, query):
-        response = requests.get(
-            f"{self.API_BASE}/search",
-            headers={"Authorization": f"Bearer {self.access_token}"},
-            params={
-                "q": query,
-                "type": "playlist",
-                "limit": 5,
-            },
-        )
-
-        response.raise_for_status()
-        return response.json()["playlists"]["items"]
-
-    # -------------------------
-    # START PLAYBACK
-    # -------------------------
-
-    def start_playback(self, device_id, playlist_uri):
-        response = requests.put(
-            f"{self.API_BASE}/me/player/play",
-            headers={"Authorization": f"Bearer {self.access_token}"},
-            params={"device_id": device_id},
-            json={"context_uri": playlist_uri},
-        )
-
-        return response.status_code == 204
-
-    # -------------------------
-    # MAIN LOGIC
-    # -------------------------
-
-    def play_adhd_focus_music(self):
-        self.authenticate()
-
-        print("\nChoose music type:")
-        print("1. Lofi Beats Focus")
-
-        choice = input("Enter choice: ")
-
-        if choice != "1":
-            print("Invalid choice.")
+    def play_all(self):
+        """Find and play all audio files"""
+        print("=" * 60)
+        print("🎵 Local Music Player")
+        print("=" * 60)
+        print(f"\n📁 Music directory: {self.music_directory}")
+        
+        # Scan for all audio files
+        music_files = self.scan_all_audio_files()
+        
+        if not music_files:
+            print("\n⚠️  No audio files found!")
+            print(f"\nTo add music, place audio files in:")
+            print(f"   {self.music_directory}")
+            print("\nSupported formats: MP3, WAV, FLAC, M4A, AAC, WMA, OGG, OPUS")
             return False
-
-        playlists = self.search_playlist("lofi beats focus")
-
-        if not playlists:
-            print("No playlists found.")
-            return False
-
-        print("\nSelect playlist:")
-        for i, playlist in enumerate(playlists):
-            print(f"{i+1}. {playlist['name']} by {playlist['owner']['display_name']}")
-
-        selection = int(input("Enter number: ")) - 1
-
-        if selection < 0 or selection >= len(playlists):
-            print("Invalid selection.")
-            return False
-
-        selected_playlist = playlists[selection]
-
-        device_id = self.get_active_device()
-        if not device_id:
-            return False
-
-        success = self.start_playback(device_id, selected_playlist["uri"])
-
-        if success:
-            print("Playback started successfully!")
+        
+        print(f"\n✓ Found {len(music_files)} audio files")
+        
+        # Show first 10 files as preview
+        print("\n📋 Files found (showing first 10):")
+        for i, file_path in enumerate(music_files[:10]):
+            print(f"   • {file_path.name}")
+        
+        if len(music_files) > 10:
+            print(f"   ... and {len(music_files) - 10} more")
+        
+        # Play all files
+        print(f"\n🎵 Playing all {len(music_files)} files...")
+        
+        try:
+            if os.name == 'nt':  # Windows
+                # On Windows, add all files to default media player queue
+                for file_path in music_files:
+                    os.startfile(str(file_path))
+            else:  # macOS/Linux
+                for file_path in music_files:
+                    subprocess.Popen(['xdg-open', str(file_path)])
+            
+            print("✓ Music started playing in your default media player!")
+            print("\n💡 Tip: Use your media player controls to:")
+            print("   - Skip tracks")
+            print("   - Shuffle")
+            print("   - Adjust volume")
             return True
-        else:
-            print("Playback failed.")
+            
+        except Exception as e:
+            print(f"\n❌ Error playing files: {e}")
             return False
 
 
@@ -192,19 +108,14 @@ class SpotifyPlayer:
 # =========================
 
 if __name__ == "__main__":
-    load_dotenv()
-
-    CLIENT_ID = os.getenv("SPOTIFY_CLIENT_ID")
-    CLIENT_SECRET = os.getenv("SPOTIFY_CLIENT_SECRET")
-    REDIRECT_URI = os.getenv("SPOTIFY_REDIRECT_URI", "http://localhost:8888/callback")
-
-    if not CLIENT_ID or not CLIENT_SECRET:
-        raise ValueError("Missing Spotify credentials in .env file")
-
-    player = SpotifyPlayer(
-        client_id=CLIENT_ID,
-        client_secret=CLIENT_SECRET,
-        redirect_uri=REDIRECT_URI
-    )
-
-    player.play_adhd_focus_music()
+    # You can set a custom directory here or it will use your Music folder
+    MUSIC_DIR = os.getenv("MUSIC_DIRECTORY", None)
+    
+    player = LocalMusicPlayer(music_directory=MUSIC_DIR)
+    
+    try:
+        player.play_all()
+    except KeyboardInterrupt:
+        print("\n\nExiting...")
+    except Exception as e:
+        print(f"\n❌ Error: {e}")
